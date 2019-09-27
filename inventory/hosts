@@ -1,0 +1,13 @@
+
+# Before you can use ansible, run `sudo apt-get -y install python-minimal` on target hosts
+#
+# see: http://allandenot.com/devops/2015/01/16/ansible-with-multiple-inventory-files.html
+# ansible-playbook -i inventory docker_login.yml
+# ansible-playbook -i inventory --limit "infra-local-demo" docker_login.yml
+# ansible all -i inventory -m ping
+
+#[topinfra-nz-dev]
+#nexus3             ansible_ssh_port=22 ansible_ssh_host=192.168.1.101 ansible_ssh_user=ubuntu
+#r1.gitlab-runner   ansible_ssh_port=22 ansible_ssh_host=192.168.1.102 ansible_ssh_user=ubuntu
+#r2.gitlab-runner   ansible_ssh_port=22 ansible_ssh_host=192.168.1.103 ansible_ssh_user=ubuntu
+#r3.gitlab-runner   ansible_ssh_port=22 ansible_ssh_host=192.168.1.104 ansible_ssh_user=ubuntu

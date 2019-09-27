@@ -1,0 +1,218 @@
+#!/usr/bin/env python
+from __future__ import print_function
+
+import os
+import re
+import sys
+import argparse
+
+import networkx as nx
+import matplotlib.pyplot as plt
+# Matplotlib 3.0+ does not support Python 2.x, 3.0, 3.1, 3.2, 3.3, or 3.4.
+from networkx.drawing.nx_pydot import write_dot
+
+import json
+from pprint import pprint
+
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+
+def artifact_name(artifact_id):
+    name = artifact_id
+    if artifact_id:
+        if artifact_id.endswith('-client'):
+            # remove last n characters of a string
+            name = artifact_id[:-len('-client')]
+        elif artifact_id.endswith('-core'):
+            name = artifact_id[:-len('-core')]
+        elif artifact_id.endswith('-common'):
+            name = artifact_id[:-len('-common')]
+        elif artifact_id.endswith('-service'):
+            name = artifact_id[:-len('-service')]
+    return name
+
+
+def iterator_to_list(iterator):
+    result = []
+    for element in iterator:
+        result.append(element)
+    return result
+
+
+def successors_list(graph, node):
+    return iterator_to_list(graph.successors(node))
+
+
+def predecessors_list(graph, node):
+    return iterator_to_list(graph.predecessors(node))
+
+
+def dependency_graph(json_file, reverse = True):
+    with open(json_file) as jsonFile:
+        data = json.load(jsonFile)
+
+    # pprint(data, stream=sys.stderr)
+
+    result = nx.DiGraph()
+
+    for artifact in data['artifacts']:
+        artifact_id = artifact['artifactId']
+        node_name = artifact_name(artifact_id)
+        eprint("artifact_id:", artifact_id, ", node_name:", node_name)
+        result.add_node(node_name)
+
+    for dependency in data['dependencies']:
+        # group:artifact_id:type:scope
+        # reversed dependency
+        from_artifact_id = dependency['to'].split(':')[1] if reverse else dependency['from'].split(':')[1]
+        to_artifact_id = dependency['from'].split(':')[1] if reverse else dependency['to'].split(':')[1]
+        eprint("from_artifact_id:", from_artifact_id, ", to_artifact_id:", to_artifact_id)
+
+        from_node_name = artifact_name(from_artifact_id)
+        to_node_name = artifact_name(to_artifact_id)
+        eprint("from_node_name:", from_node_name, ", to_node_name:", to_node_name)
+        result.add_edge(from_node_name, to_node_name)
+
+    return result
+
+
+def draw_graph(graph):
+    pos = nx.nx_agraph.graphviz_layout(graph)
+    nx.draw(graph, pos=pos)
+    # matplotlib RuntimeError:
+    # Python is not installed as a framework.
+    # The Mac OS X backend will not be able to function correctly if Python is not installed as a framework.
+    # mkdir -p ~/.matplotlib
+    # echo 'backend: TkAgg' | tee ~/.matplotlib/matplotlibrc
+    plt.savefig("dependencies.png")
+    write_dot(graph, 'dependencies.dot')
+    # dot -Tpng -o dependencies.png dependencies.dot
+
+
+def comp_node(graph, node_x, node_y):
+    sx = len(successors_list(graph, node_x))
+    sy = len(successors_list(graph, node_y))
+    if sy - sx != 0:
+        return sy - sx
+    else:
+        px = len(predecessors_list(graph, node_x))
+        py = len(predecessors_list(graph, node_y))
+        return py - px
+
+
+def node_column_dict(dag):
+    result = {}
+    for node in dag.nodes:
+        result[node] = 0
+
+    stack = iterator_to_list(dag.nodes)[:]
+    while len(stack) > 0:
+        node = stack.pop()
+        successors = successors_list(dag, node)
+
+        for successor in successors:
+            result[successor] = max(result[successor], result[node] + 1)
+            stack.append(successor)
+
+    return result
+
+
+def level_node_list(dag):
+    n_c = node_column_dict(dag)
+
+    level_max = max(n_c.values())
+
+    result = [list() for _ in range(level_max + 1)]
+    for node in n_c:
+        result[n_c[node]].append(node)
+
+    for level in result:
+        level.sort(lambda x, y: comp_node(dag, x, y))
+
+    return result
+
+
+def predecessors_all(dag, n_c, node, result=None):
+    lev = n_c[node]
+    if not result:
+        result = [list() for _ in range(lev + 1)]
+
+    if node not in result[lev]:
+        result[lev].append(node)
+
+    predecessors = predecessors_list(dag, node)
+    for predecessor in predecessors:
+        predecessors_all(dag, n_c, predecessor, result)
+
+    return result
+
+
+def successor_all(dag, n_c, node, result=None):
+    max_lev = max(n_c.values())
+    lev = n_c[node]
+    if not result:
+        result = [list() for _ in range(max_lev - lev + 1)]
+
+    if node not in result[max_lev - lev]:
+        result[max_lev - lev].append(node)
+
+    successors = successors_list(dag, node)
+    for successor in successors:
+        successor_all(dag, n_c, successor, result)
+
+    return result
+
+
+def dependencies(dag, artifact):
+    node = artifact
+    n_c = node_column_dict(dag)
+    return predecessors_all(dag, n_c, node)
+
+
+def dependants(dag, artifact):
+    node = artifact
+    n_c = node_column_dict(dag)
+    result = successor_all(dag, n_c, node)
+    result.reverse()
+    return result
+
+
+def print_graph(dag):
+    nodes = iterator_to_list(dag.nodes)
+    for n_idx, node in enumerate(nodes):
+        print("node_", n_idx, "=", node, sep='', end='\n', file=sys.stdout)
+        for s_idx, successor in enumerate(successors_list(DG, node)):
+            print("node_", n_idx, "_successor[", s_idx, "]=", successor, sep='', end='\n', file=sys.stdout)
+        for p_idx, predecessor in enumerate(predecessors_list(DG, node)):
+            print("node_", n_idx, "_predecessor[", p_idx, "]=", predecessor, sep='', end='\n', file=sys.stdout)
+
+
+def print_release_formation(dag):
+    # dag = dependency_graph(json_file)
+    for column, nodes in enumerate(level_node_list(dag)):
+        for idx, node in enumerate(nodes):
+            print("column_", column, "[", idx, "]=", node, sep='', end='\n', file=sys.stdout)
+
+
+DG = dependency_graph('dependency-graph.json')
+draw_graph(DG)
+print_graph(DG)
+print_release_formation(DG)
+pprint(node_column_dict(DG), stream=sys.stderr)
+
+dependencies_record = dependencies(DG, 'guardian-record')
+dependants_record = dependants(DG, 'guardian-record')
+eprint("guardian-record dependencies:", dependencies_record)
+eprint("guardian-record dependants:", dependants_record)
+
+dependencies_blacklist = dependencies(DG, 'guardian-blacklist')
+dependants_blacklist = dependants(DG, 'guardian-blacklist')
+eprint("guardian-blacklist dependencies:", dependencies_blacklist)
+eprint("guardian-blacklist dependants:", dependants_blacklist)
+
+dependencies_report = dependencies(DG, 'guardian-report')
+dependants_report = dependants(DG, 'guardian-report')
+eprint("guardian-report dependencies:", dependencies_report)
+eprint("guardian-report dependants:", dependants_report)

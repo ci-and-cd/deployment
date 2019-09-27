@@ -1,0 +1,115 @@
+# Bash completion script for deploy(1)
+# see: /usr/local/Homebrew/completions/bash/brew or /usr/local/etc/bash_completion.d/brew
+# for zsh, see: /usr/local/Homebrew/completions/zsh/_brew or /usr/local/share/zsh/site-functions/_brew
+
+# Indicates there are no completions
+__deploycomp_null() {
+  COMPREPLY=""
+}
+
+__deploycomp_words_include() {
+  local i=1
+  while [[ "$i" -lt "$COMP_CWORD" ]]
+  do
+    if [[ "${COMP_WORDS[i]}" = "$1" ]]
+    then
+      return 0
+    fi
+    i="$((++i))"
+  done
+  return 1
+}
+
+# Find the previous non-switch word
+__deploycomp_prev() {
+  local idx="$((COMP_CWORD - 1))"
+  local prv="${COMP_WORDS[idx]}"
+  while [[ "$prv" = -* ]]
+  do
+    idx="$((--idx))"
+    prv="${COMP_WORDS[idx]}"
+  done
+  echo "$prv"
+}
+
+__deploycomp() {
+  # break $1 on space, tab, and newline characters,
+  # and turn it into a newline separated list of words
+  local list s sep=$'\n' IFS=$' '$'\t'$'\n'
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+
+  for s in $1
+  do
+    __deploycomp_words_include "$s" && continue
+    list="$list$s$sep"
+  done
+
+  IFS="$sep"
+  COMPREPLY=($(compgen -W "$list" -- "$cur"))
+}
+
+__deploy_complete_environment() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  local environments="$(deploy environments)"
+  COMPREPLY=($(compgen -W "$environments" -- "$cur"))
+}
+
+__deploy_complete_instance() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  local instances="$(deploy search)"
+  local shortnames="$(deploy search -s)"
+  COMPREPLY=($(compgen -W "$instances $shortnames" -- "$cur"))
+}
+
+_deploy() {
+  local i=1 cmd
+
+  # find the subcommand
+  while [[ "$i" -lt "$COMP_CWORD" ]]
+  do
+    local s="${COMP_WORDS[i]}"
+    case "$s" in
+      --*)
+        cmd="$s"
+        break
+        ;;
+      -*)
+        ;;
+      *)
+        cmd="$s"
+        break
+        ;;
+    esac
+    i="$((++i))"
+  done
+
+  if [[ "$i" -eq "$COMP_CWORD" ]]
+  then
+    # Prefix newline to prevent not checking the first command.
+    local cmds=$'\n'"$(deploy commands)"
+    __deploycomp "${cmds}"
+    return
+  fi
+
+  # subcommands have their own completion functions
+  case "$cmd" in
+    clean)                      __deploy_complete_environment ;;
+    docker-compose)             __deploy_complete_instance ;;
+    environment)                __deploy_complete_environment ;;
+    fix-permissions)            __deploy_complete_instance ;;
+    instance-deploy-config)     __deploy_complete_instance ;;
+    instance-dir)               __deploy_complete_instance ;;
+    instance-properties)        __deploy_complete_instance ;;
+    instance-properties-dir)    __deploy_complete_instance ;;
+    instance-service)           __deploy_complete_instance ;;
+    instance-variables)         __deploy_complete_instance ;;
+    *)                          ;;
+  esac
+}
+
+# keep around for compatibility
+_deploy_to_completion() {
+  _deploy
+}
+
+complete -o bashdefault -o default -F _deploy deploy
